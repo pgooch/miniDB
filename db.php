@@ -16,7 +16,7 @@ class db extends mysqli{
 	private $user = null;
 	private $pass = null;
 	private $db = null;
-	private $charset = 'utf8';
+	private $charset = null;
 
 	/*
 		The constructor will attempt find the required connection information and then attempt to connect. If any 
@@ -47,8 +47,10 @@ class db extends mysqli{
 					if(defined('db_'.$arg)){
 						$args[$arg] = constant('db_'.$arg);
 					}else{
-						// Null was passed, private was not updated, and it was not defined, throw an exception
-						throw new Exception('the "db.php" class was unable to find "'.$arg.'", was not passed, found in class, or found as a definition.');
+						if($arg!='charset'){
+							// Null was passed, private was not updated, and it was not defined, throw an exception
+							throw new Exception('the "db.php" class was unable to find "'.$arg.'", was not passed, found in class, or found as a definition.');
+						}
 					}
 				}
 			}
@@ -63,7 +65,9 @@ class db extends mysqli{
 		}
 
 		// Else set the charset and return the object
-		parent::set_charset($args['charset']);
+		if($args['charset']!=null){
+			parent::set_charset($args['charset']);
+		}
 		return $db;
 
 	}
@@ -97,9 +101,11 @@ class db extends mysqli{
 	/*
 		This will take a query and return the results in a multi-dimensional array. If there are no results then it will 
 		return an empty array, if there was an error with the query it will throw a warning and return false. If your 
-		only looking for a single result consider get_single()
+		only looking for a single result consider get_single(). If you pass the option key_column the function will take 
+		the value of that column and use it as the key to the array containing that information. That column will not be 
+		removed from the nested array. If it cannot find the key column it will revert to using standard numic keys
 	*/
-	function get($query){
+	function get($query,$key_column=null){
 
 		// Run the provided query
 		$query = $this->query($query);
@@ -118,7 +124,11 @@ class db extends mysqli{
 		// Otherwise crate a varible to store the results in and loop through them all, and return it
 		$results = array();
 		while($result = $query->fetch_assoc()){
-			$results[] = $result;
+			if(!is_null($key_column)){
+				$results[$result[$key_column]] = $result;
+			}else{
+				$results[] = $result;
+			}
 		}
 		return $results;
 	}
@@ -145,6 +155,44 @@ class db extends mysqli{
 
 		// Return the first row regardless
 		return $query->fetch_assoc();
+	}
+
+	/*
+		This will insert an array into the database, Good for dumping something in in a sort of set-it-and-forget-it 
+		sorta way.
+	*/
+	function insert($table,$data){
+		
+		// Create the appropraite data string
+		$data_string_k = '';
+		$data_string_v = '';
+		foreach($data as $k => $v){
+			$data_string_k .= ', `'.$k.'`';
+			$data_string_v .= ', "'.$this->esc($v).'"';
+		}
+		$data_string = '('.substr($data_string_k,1).') values ('.substr($data_string_v,1).')';
+
+		// Inserts an array into the specified table
+		return $this->query('insert into `'.$this->e($table).'` '.$data_string);
+	}
+
+	/*
+		This function updates. It works much the same way that insert does, however it also required a where clause.
+	*/
+	function update($table,$data,$where){
+
+		// lets clean of the where clause
+		$where = preg_replace('~^where ?~','',trim($where));
+
+		// Process the form and trun it to an update_string
+		$update_string = '';
+		foreach($data as $k => $v){
+			$update_string .= ', `'.$k.'` = "'.$this->e($v).'"';
+		}
+		$update_string = substr($update_string,2);
+
+		// Craft and call the query
+		return $this->query('update `'.$this->e($table).'` set '.$update_string.' where '.$where);
 	}
 
 }
