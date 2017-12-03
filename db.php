@@ -57,7 +57,7 @@ class db extends mysqli{
 		}
 
 		// Try to connect to the db
-		@$db = parent::mysqli($args['host'],$args['user'],$args['pass'],$args['db']);
+		@$db = parent::__construct($args['host'],$args['user'],$args['pass'],$args['db']);
 
 		// If there is an error fail out with an exception
 		if($this->connect_errno){
@@ -91,7 +91,7 @@ class db extends mysqli{
 		The query function is a passthrough to the mysqli query function however it also logs the last query and the 
 		last error in the process
 	*/
-	function query($query){
+	function query($query,$result_mode=null){
 		$this->last_query = $query;
 		$query = parent::query($query);
 		$this->last_error = $this->error;
@@ -124,6 +124,7 @@ class db extends mysqli{
 		// Otherwise crate a varible to store the results in and loop through them all, and return it
 		$results = array();
 		while($result = $query->fetch_assoc()){
+			$result = $this->decode_jsons($result);
 			if(!is_null($key_column)){
 				$results[$result[$key_column]] = $result;
 			}else{
@@ -154,7 +155,29 @@ class db extends mysqli{
 		}
 
 		// Return the first row regardless
-		return $query->fetch_assoc();
+		$result = $query->fetch_assoc();
+		$result = $this->decode_jsons($result);
+		return $result;
+	}
+
+	/*
+		This will make the request call and return the number of rows found, effectivly can be used for true/fale is 
+		records (which is what the other similar function does).
+	*/
+	function get_record_count($query){
+		$query = $this->query($query);
+		return $query->num_rows;
+	}
+
+	/*
+		This function is very similar to the above except it return a true/false instead of a count
+	*/
+	function found($query){
+		if($this->get_record_count($query)>0){
+			return true;
+		}else{
+			return false;
+		}
 	}
 
 	/*
@@ -166,6 +189,7 @@ class db extends mysqli{
 		// Create the appropraite data string
 		$data_string_k = '';
 		$data_string_v = '';
+		$data = $this->encode_jsons($data);
 		foreach($data as $k => $v){
 			$data_string_k .= ', `'.$k.'`';
 			$data_string_v .= ', "'.$this->esc($v).'"';
@@ -186,6 +210,7 @@ class db extends mysqli{
 
 		// Process the form and trun it to an update_string
 		$update_string = '';
+		$data = $this->encode_jsons($data);
 		foreach($data as $k => $v){
 			$update_string .= ', `'.$k.'` = "'.$this->e($v).'"';
 		}
@@ -193,6 +218,58 @@ class db extends mysqli{
 
 		// Craft and call the query
 		return $this->query('update `'.$this->e($table).'` set '.$update_string.' where '.$where);
+	}
+
+	/*
+		Insert or, if it's already there, update on a specific key
+	*/
+	function insert_or_update($table,$data){
+
+		// Create the appropraite data string
+		$data_string_k = '';
+		$data_string_v = '';
+		$data = $this->encode_jsons($data);
+		foreach($data as $k => $v){
+			$data_string_k .= ', `'.$k.'`';
+			$data_string_v .= ', "'.$this->esc($v).'"';
+		}
+		$data_string = '('.substr($data_string_k,1).') values ('.substr($data_string_v,1).')';
+
+		// Process the form and trun it to an update_string
+		$update_string = '';
+		$data = $this->encode_jsons($data);
+		foreach($data as $k => $v){
+			$update_string .= ', `'.$k.'` = "'.$this->e($v).'"';
+		}
+		$update_string = substr($update_string,2);
+
+		// Inserts an array into the specified table
+		return $this->query('insert into `'.$this->e($table).'`'.$data_string.' on duplicate key update '.$update_string);
+
+	}
+
+	/*
+		This function will look through the fields returned and decode any that have the speical JSON start to them.
+	*/
+	function decode_jsons($data){
+		foreach($data as $key => $value){
+			if(substr($value,0,9)=='_db_json'."\n"){
+				$data[$key] = json_decode(substr($value,9),true);
+			}
+		}
+		return $data;
+	}
+
+	/*
+		This will look through the provided data and convert any arrays into JSON objects with a special header this class looks for
+	*/
+	function encode_jsons($data){
+		foreach($data as $key => $value){
+			if(is_array($value)){
+				$data[$key] = '_db_json'."\n".json_encode($value);
+			}
+		}
+		return $data;
 	}
 
 }
